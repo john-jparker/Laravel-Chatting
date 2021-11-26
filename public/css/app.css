@@ -1344,6 +1344,9 @@ select {
 .h-full {
 	height: 100%;
 }
+.max-h-32 {
+	max-height: 8rem;
+}
 .min-h-screen {
 	min-height: 100vh;
 }
@@ -1397,6 +1400,9 @@ select {
 }
 .w-7 {
 	width: 1.75rem;
+}
+.w-32 {
+	width: 8rem;
 }
 .min-w-0 {
 	min-width: 0px;
@@ -1491,6 +1497,9 @@ select {
 }
 .flex-wrap {
 	flex-wrap: wrap;
+}
+.content-start {
+	align-content: flex-start;
 }
 .items-start {
 	align-items: flex-start;
@@ -1854,6 +1863,10 @@ select {
 .py-10 {
 	padding-top: 2.5rem;
 	padding-bottom: 2.5rem;
+}
+.px-5 {
+	padding-left: 1.25rem;
+	padding-right: 1.25rem;
 }
 .pt-6 {
 	padding-top: 1.5rem;
@@ -2610,6 +2623,16 @@ select {
 
 	.lg\:grid-cols-6 {
 		grid-template-columns: repeat(6, minmax(0, 1fr));
+	}
+
+	.lg\:gap-2 {
+		gap: 0.5rem;
+	}
+
+	.lg\:space-y-0 > :not([hidden]) ~ :not([hidden]) {
+		--tw-space-y-reverse: 0;
+		margin-top: calc(0px * calc(1 - var(--tw-space-y-reverse)));
+		margin-bottom: calc(0px * var(--tw-space-y-reverse));
 	}
 
 	.lg\:px-8 {

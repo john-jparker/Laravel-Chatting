@@ -172,7 +172,11 @@
                                             <div class="relative text-sm  py-2 px-4 shadow rounded-xl"
                                                  :class="message.sender_id == userId? 'bg-white ml-3': 'mr-3 text-white bg-indigo-400'"
                                             >
-                                                <div>{{ message.message }}</div>
+                                                <div v-if="message.message_type == types['Text']">{{ message.message }}</div>
+                                                <a :href="message.message" target="_blank" class="w-32 rounded" v-if="message.message_type == types['Image']">
+                                                    <img :src="message.message"
+                                                         alt="image" class="w-32 max-h-32 rounded shadow">
+                                                </a>
                                                 <small class="float-right">{{ message.send_at }}</small>
                                             </div>
                                         </div>
@@ -194,10 +198,23 @@
                                 </div>
                             </div>
                             <form action="" @submit.prevent="sendMessage()" class="inline">
+                                <div v-if="form.images" class="bg-gray-100 px-5 py-2 space-y-2 lg:space-y-0 lg:gap-2 flex items-start content-start">
+                                    <div class="w-32 rounded relative">
+                                        <a class="h-6 w-6 bg-red-600 rounded-full absolute top-0 right-0 flex justify-center items-center"
+                                            href="#" @click.prevent="removeImage()"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </a>
+                                        <img :src="form.images"
+                                             alt="image" class="w-32 max-h-32 rounded shadow">
+                                    </div>
+                                </div>
                                 <div class="flex flex-row items-center bg-white px-6 pb-4 pt-2">
 
                                     <div class="flex flex-row items-center w-full border rounded-3xl h-12 px-2">
-                                        <button class="flex items-center justify-center h-10 w-10 text-gray-400 ml-1">
+                                        <button type="button" class="flex items-center justify-center h-10 w-10 text-gray-400 ml-1">
                                             <svg class="w-5 h-5"
                                                  fill="none"
                                                  stroke="currentColor"
@@ -213,8 +230,10 @@
                                             <input type="text"
                                                    v-model="form.message"
                                                    @keyup="typing()"
+                                                   :disabled="form.images"
                                                    class="border border-transparent w-full focus:outline-none text-sm h-10 flex items-center"
                                                    placeholder="Type your message....">
+
                                         </div>
                                         <div class="flex flex-row">
                                             <button class="flex items-center justify-center h-10 w-8 text-gray-400">
@@ -230,6 +249,7 @@
                                                 </svg>
                                             </button>
                                             <button
+                                                @click.prevent="selectNewPhoto"
                                                 class="flex items-center justify-center h-10 w-8 text-gray-400 ml-1 mr-2">
                                                 <svg class="w-5 h-5"
                                                      fill="none"
@@ -242,6 +262,7 @@
                                                           d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                                                 </svg>
                                             </button>
+
                                         </div>
                                     </div>
                                     <div class="ml-6">
@@ -267,6 +288,14 @@
                 </div>
             </div>
         </div>
+        <input type="file" name="images"
+               ref="ImagePath"
+               class="opacity-0" id="images"
+               accept="image/jpeg,image/jpg,image/png"
+               @change="updatePhotoPreview"
+        >
+
+<!--        @input="form.images = $event.target.files[0]"-->
     </app-layout>
 </template>
 
@@ -280,7 +309,7 @@ export default {
         UserItem,
         AppLayout,
     },
-    props:['users', 'user'],
+    props:['users', 'user', 'types'],
     data(){
         return{
             page: 1,
@@ -293,7 +322,9 @@ export default {
             liveUsers:[],
             form: {
                 user_id: '',
-                message: ''
+                message: '',
+                message_type: this.types['Text'],
+                images: null,
             },
             typingUserIds: [],
 
@@ -361,20 +392,7 @@ export default {
                     console.log(err)
                 });
         },
-        sendMessage(){
-            this.form.user_id = this.userId;
-            axios.post(route('user.message.send'), this.form)
-                .then((response) => {
-                    if (response.status == 200){
-                        this.messages.push(response.data);
-                        this.form.message = '';
-                        this.scrollToBottom();
-                        this.updateLastMessage(response.data);
-                    }
-                }).catch(err => {
-                console.log(err)
-            });
-        },
+
         typing(){
             Echo.private(`typingevent`)
                 .whisper('typing', {
@@ -398,7 +416,40 @@ export default {
                     }
                 }
             })
+        },
+        sendMessage(){
+            this.form.user_id = this.userId;
+            axios.post(route('user.message.send'), this.form)
+                .then((response) => {
+                    if (response.status == 200){
+                        this.messages.push(response.data);
+                        this.form.message = '';
+                        this.form.images =null;
+                        this.form.message_type=this.types['Text'];
+                        this.scrollToBottom();
+                        this.updateLastMessage(response.data);
+                    }
+                }).catch(err => {
+                console.log(err)
+            });
+        },
+        selectNewPhoto() {
+            this.$refs.ImagePath.click();
+        },
+
+        updatePhotoPreview() {
+            this.form.message_type= this.types['Image'];
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.form.images = e.target.result;
+            };
+            reader.readAsDataURL(this.$refs.ImagePath.files[0]);
+        },
+        removeImage(){
+            this.form.message_type= this.types['Text'];
+            this.form.images = null;
         }
+
     },
     computed: {
         allUsers(){

@@ -19,8 +19,8 @@ class MessageController extends Controller
 
         $users = $users->sortByDesc('last_message.created_at');
         $users = $users->values()->all();
-////        dd($users);
-        return Inertia::render('Dashboard', compact('users'));
+        $types = Message::MessageType;
+        return Inertia::render('Dashboard', compact('users', 'types'));
     }
 
     public function selected_user_message(Request $request, $userId)
@@ -62,8 +62,9 @@ class MessageController extends Controller
         $senderMessage = Message::create([
             'sender_id'=>auth()->id(),
             'receiver_id'=>$request->user_id,
-            'message'=>$request->message,
+            'message'=>!empty($request->images)? $request->images: $request->message,
             'type'=>Message::Types['Sender'],
+            'message_type'=>$request->message_type,
             'read_at'=>now()
         ]);
 
