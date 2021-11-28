@@ -29,6 +29,7 @@
     },
     "dependencies": {
         "moment": "^2.29.1",
+        "recorder-js": "^1.0.7",
         "vue-moment": "^4.1.0"
     }
 }

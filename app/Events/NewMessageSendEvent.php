@@ -16,14 +16,16 @@ class NewMessageSendEvent implements ShouldBroadcast
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public $message;
+    public $reload;
     /**
      * Create a new event instance.
      *
      * @return void
      */
-    public function __construct($message)
+    public function __construct($message, $reload=false)
     {
         $this->message = $message;
+        $this->reload = $reload;
     }
 
     /**

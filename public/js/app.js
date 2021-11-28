@@ -20637,6 +20637,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _Components_UserItem__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! @/Components/UserItem */ "./resources/js/Components/UserItem.vue");
 /* harmony import */ var lodash__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! lodash */ "./node_modules/lodash/lodash.js");
 /* harmony import */ var lodash__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(lodash__WEBPACK_IMPORTED_MODULE_2__);
+/* harmony import */ var recorder_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(/*! recorder-js */ "./node_modules/recorder-js/index.js");
 function _toConsumableArray(arr) { return _arrayWithoutHoles(arr) || _iterableToArray(arr) || _unsupportedIterableToArray(arr) || _nonIterableSpread(); }
 
 function _nonIterableSpread() { throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
@@ -20648,6 +20649,7 @@ function _iterableToArray(iter) { if (typeof Symbol !== "undefined" && iter[Symb
 function _arrayWithoutHoles(arr) { if (Array.isArray(arr)) return _arrayLikeToArray(arr); }
 
 function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len = arr.length; for (var i = 0, arr2 = new Array(len); i < len; i++) { arr2[i] = arr[i]; } return arr2; }
+
 
 
 
@@ -20664,17 +20666,25 @@ function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len 
       last_page: 1,
       perPage: 15,
       userId: '',
-      messages: [],
       selectedUser: '',
       authUser: this.user,
       liveUsers: [],
+      typingUserIds: [],
+      messages: [],
       form: {
         user_id: '',
-        message: '',
+        text_message: '',
         message_type: this.types['Text'],
-        images: null
+        file_data: []
       },
-      typingUserIds: []
+      temp_images: [],
+      is_recording: false,
+      stop_recording: false,
+      audioContext: new (window.AudioContext || window.webkitAudioContext)(),
+      recorder: '',
+      gumStream: '',
+      temp_blob_audio: '',
+      temp_audio_url: ''
     };
   },
   created: function created() {
@@ -20778,22 +20788,51 @@ function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len 
     sendMessage: function sendMessage() {
       var _this5 = this;
 
-      this.form.user_id = this.userId;
-      axios.post(route('user.message.send'), this.form).then(function (response) {
-        if (response.status == 200) {
+      var formData = this.formData();
+      axios.post(route('user.message.send'), formData).then(function (response) {
+        if (response.status === 200) {
           _this5.messages.push(response.data);
-
-          _this5.form.message = '';
-          _this5.form.images = null;
-          _this5.form.message_type = _this5.types['Text'];
 
           _this5.scrollToBottom();
 
           _this5.updateLastMessage(response.data);
+
+          _this5.resetFormData();
         }
       })["catch"](function (err) {
         console.log(err);
       });
+    },
+    formData: function formData() {
+      var fd = new FormData();
+      fd.append('user_id', this.userId);
+      fd.append('text_message', this.form.text_message);
+      fd.append('message_type', this.form.message_type);
+
+      if (this.form.message_type === this.types['Text']) {
+        fd.append('file_data', null);
+      } else if (this.form.message_type === this.types['Audio']) {
+        var filename = new Date().toISOString();
+        fd.append('file_data', this.temp_blob_audio, filename);
+      } else if (this.form.message_type === this.types['Image']) {
+        var images = [];
+
+        for (var i = 0; i < this.temp_images.length; i++) {
+          images.push(this.temp_images[i]);
+        }
+
+        fd.append('file_data', images);
+      }
+
+      return fd;
+    },
+    resetFormData: function resetFormData() {
+      this.form.user_id = '';
+      this.form.text_message = '';
+      this.form.message_type = this.types['Text'];
+      this.form.file_data = null;
+      this.temp_images = [];
+      this.clearRecord();
     },
     selectNewPhoto: function selectNewPhoto() {
       this.$refs.ImagePath.click();
@@ -20802,17 +20841,70 @@ function _arrayLikeToArray(arr, len) { if (len == null || len > arr.length) len 
       var _this6 = this;
 
       this.form.message_type = this.types['Image'];
-      var reader = new FileReader();
 
-      reader.onload = function (e) {
-        _this6.form.images = e.target.result;
-      };
+      for (var i = 0; i < this.$refs.ImagePath.files.length; i++) {
+        var reader = new FileReader();
 
-      reader.readAsDataURL(this.$refs.ImagePath.files[0]);
+        reader.onload = function (e) {
+          _this6.temp_images.push(e.target.result);
+        };
+
+        reader.readAsDataURL(this.$refs.ImagePath.files[i]);
+      }
     },
-    removeImage: function removeImage() {
+    removeImage: function removeImage(key) {
+      this.temp_images.splice(key, 1);
+      this.form.file_data.splice(key, 1);
+
+      if (this.temp_images.length == 0) {
+        this.form.message_type = this.types['Text'];
+      }
+    },
+    startRecording: function startRecording() {
+      this.typing();
+      var $that = this;
+      navigator.mediaDevices.getUserMedia({
+        audio: true
+      }).then(function (stream) {
+        /* Create the Recorder object and configure to record mono sound (1 channel) Recording 2 channels will double the file size */
+        $that.recorder = new recorder_js__WEBPACK_IMPORTED_MODULE_3__["default"]($that.audioContext, {
+          numChannels: 1
+        });
+        $that.recorder.init(stream); //start the recording process
+
+        $that.recorder.start().then(function () {
+          $that.is_recording = true;
+        });
+        console.log("Recording started");
+      })["catch"](function (err) {
+        //enable the record button if getUserMedia() fails
+        console.log(err);
+        $that.is_recording = false;
+      });
+    },
+    stopAudioRecordAndProcess: function stopAudioRecordAndProcess() {
+      var $that = this;
+      this.recorder.stop().then(function (_ref) {
+        var blob = _ref.blob,
+            buffer = _ref.buffer;
+        $that.createDownloadLink(blob);
+      });
+    },
+    createDownloadLink: function createDownloadLink(blob) {
+      this.temp_blob_audio = blob;
+      var URL = window.URL || window.webkitURL;
+      this.temp_audio_url = URL.createObjectURL(blob);
+      this.stop_recording = true;
+      this.is_recording = false;
+    },
+    clearRecord: function clearRecord() {
+      this.temp_blob_audio = '';
+      this.recorder = '';
+      this.gumStream = '';
+      this.temp_audio_url = '';
+      this.stop_recording = false;
+      this.is_recording = false;
       this.form.message_type = this.types['Text'];
-      this.form.images = null;
     }
   },
   computed: {
@@ -24831,8 +24923,9 @@ var _hoisted_35 = {
 var _hoisted_36 = {
   "class": "w-32 rounded relative"
 };
+var _hoisted_37 = ["onClick"];
 
-var _hoisted_37 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
+var _hoisted_38 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
   xmlns: "http://www.w3.org/2000/svg",
   "class": "h-5 w-5 text-white",
   fill: "none",
@@ -24847,42 +24940,80 @@ var _hoisted_37 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElement
 /* HOISTED */
 );
 
-var _hoisted_38 = [_hoisted_37];
-var _hoisted_39 = ["src"];
-var _hoisted_40 = {
+var _hoisted_39 = [_hoisted_38];
+var _hoisted_40 = ["src"];
+var _hoisted_41 = {
   "class": "flex flex-row items-center bg-white px-6 pb-4 pt-2"
 };
-var _hoisted_41 = {
+var _hoisted_42 = {
   "class": "flex flex-row items-center w-full border rounded-3xl h-12 px-2"
 };
 
-var _hoisted_42 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
-  type: "button",
-  "class": "flex items-center justify-center h-10 w-10 text-gray-400 ml-1"
-}, [/*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
-  "class": "w-5 h-5",
-  fill: "none",
-  stroke: "currentColor",
-  viewBox: "0 0 24 24",
-  xmlns: "http://www.w3.org/2000/svg"
-}, [/*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("path", {
+var _hoisted_43 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("path", {
   "stroke-linecap": "round",
   "stroke-linejoin": "round",
   "stroke-width": "2",
   d: "M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-})])], -1
+}, null, -1
 /* HOISTED */
 );
 
-var _hoisted_43 = {
+var _hoisted_44 = [_hoisted_43];
+var _hoisted_45 = {
+  key: 0,
+  "class": "animate-ping absolute inline-flex w-6 h-6 rounded-full bg-purple-400 opacity-75"
+};
+var _hoisted_46 = {
+  key: 0,
   "class": "w-full"
 };
-var _hoisted_44 = ["disabled"];
-var _hoisted_45 = {
+var _hoisted_47 = {
+  key: 0,
+  "class": "text-purple-500 font-bold pl-3"
+};
+var _hoisted_48 = ["src"];
+var _hoisted_49 = {
+  key: 1,
+  "class": "w-full"
+};
+var _hoisted_50 = ["disabled"];
+var _hoisted_51 = {
   "class": "flex flex-row"
 };
 
-var _hoisted_46 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
+var _hoisted_52 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
+  xmlns: "http://www.w3.org/2000/svg",
+  "class": "h-6 w-6 text-red-600",
+  viewBox: "0 0 20 20",
+  fill: "currentColor"
+}, [/*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("path", {
+  "fill-rule": "evenodd",
+  d: "M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z",
+  "clip-rule": "evenodd"
+})], -1
+/* HOISTED */
+);
+
+var _hoisted_53 = [_hoisted_52];
+
+var _hoisted_54 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
+  xmlns: "http://www.w3.org/2000/svg",
+  "class": "h-6 w-6 text-red-600",
+  fill: "none",
+  viewBox: "0 0 24 24",
+  stroke: "currentColor"
+}, [/*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("path", {
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round",
+  "stroke-width": "2",
+  d: "M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+})], -1
+/* HOISTED */
+);
+
+var _hoisted_55 = [_hoisted_54];
+
+var _hoisted_56 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
   "class": "flex items-center justify-center h-10 w-8 text-gray-400"
 }, [/*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
   "class": "w-5 h-5",
@@ -24899,7 +25030,7 @@ var _hoisted_46 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElement
 /* HOISTED */
 );
 
-var _hoisted_47 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
+var _hoisted_57 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("svg", {
   "class": "w-5 h-5",
   fill: "none",
   stroke: "currentColor",
@@ -24914,9 +25045,9 @@ var _hoisted_47 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElement
 /* HOISTED */
 );
 
-var _hoisted_48 = [_hoisted_47];
+var _hoisted_58 = [_hoisted_57];
 
-var _hoisted_49 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", {
+var _hoisted_59 = /*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", {
   "class": "ml-6"
 }, [/*#__PURE__*/(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
   type: "submit",
@@ -25028,52 +25159,108 @@ function render(_ctx, _cache, $props, $setup, $data, $options) {
       /* PROPS */
       , _hoisted_33)]), _hoisted_34])])) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true)])]), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("form", {
         action: "",
-        onSubmit: _cache[4] || (_cache[4] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function ($event) {
+        onSubmit: _cache[6] || (_cache[6] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function ($event) {
           return $options.sendMessage();
         }, ["prevent"])),
         "class": "inline"
-      }, [$data.form.images ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("div", _hoisted_35, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_36, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("a", {
-        "class": "h-6 w-6 bg-red-600 rounded-full absolute top-0 right-0 flex justify-center items-center",
-        href: "#",
-        onClick: _cache[0] || (_cache[0] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function ($event) {
-          return $options.removeImage();
+      }, [$data.temp_images.length > 0 ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("div", _hoisted_35, [((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(true), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)(vue__WEBPACK_IMPORTED_MODULE_0__.Fragment, null, (0,vue__WEBPACK_IMPORTED_MODULE_0__.renderList)($data.temp_images, function (image, idx) {
+        return (0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("div", _hoisted_36, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("a", {
+          "class": "h-6 w-6 bg-red-600 rounded-full absolute top-0 right-0 flex justify-center items-center",
+          href: "#",
+          onClick: (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function ($event) {
+            return $options.removeImage(idx);
+          }, ["prevent"])
+        }, _hoisted_39, 8
+        /* PROPS */
+        , _hoisted_37), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("img", {
+          src: image,
+          alt: "image",
+          "class": "w-32 max-h-32 rounded shadow"
+        }, null, 8
+        /* PROPS */
+        , _hoisted_40)]);
+      }), 256
+      /* UNKEYED_FRAGMENT */
+      ))])) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_41, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_42, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
+        type: "button",
+        "class": "flex items-center justify-center h-10 w-10 text-gray-400 ml-1 relative",
+        onClick: _cache[0] || (_cache[0] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function () {
+          return $options.startRecording && $options.startRecording.apply($options, arguments);
         }, ["prevent"]))
-      }, _hoisted_38), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("img", {
-        src: $data.form.images,
-        alt: "image",
-        "class": "w-32 max-h-32 rounded shadow"
+      }, [((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("svg", {
+        "class": (0,vue__WEBPACK_IMPORTED_MODULE_0__.normalizeClass)(["w-5 h-5", $data.is_recording ? 'text-purple-700' : '']),
+        fill: "none",
+        stroke: "currentColor",
+        viewBox: "0 0 24 24",
+        xmlns: "http://www.w3.org/2000/svg"
+      }, _hoisted_44, 2
+      /* CLASS */
+      )), $data.is_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("span", _hoisted_45)) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true)]), $data.is_recording || $data.stop_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("div", _hoisted_46, [!$data.stop_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("p", _hoisted_47, "Recording.....")) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true), $data.stop_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("audio", {
+        key: 1,
+        src: $data.temp_audio_url,
+        controls: "",
+        "class": "w-full",
+        style: {
+          "padding": "10px"
+        }
       }, null, 8
       /* PROPS */
-      , _hoisted_39)])])) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_40, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_41, [_hoisted_42, (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_43, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.withDirectives)((0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("input", {
+      , _hoisted_48)) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true)])) : ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("div", _hoisted_49, [(0,vue__WEBPACK_IMPORTED_MODULE_0__.withDirectives)((0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("input", {
         type: "text",
         "onUpdate:modelValue": _cache[1] || (_cache[1] = function ($event) {
-          return $data.form.message = $event;
+          return $data.form.text_message = $event;
         }),
         onKeyup: _cache[2] || (_cache[2] = function ($event) {
           return $options.typing();
         }),
-        disabled: $data.form.images,
+        disabled: $data.temp_images.length > 0,
         "class": "border border-transparent w-full focus:outline-none text-sm h-10 flex items-center",
         placeholder: "Type your message...."
       }, null, 40
       /* PROPS, HYDRATE_EVENTS */
-      , _hoisted_44), [[vue__WEBPACK_IMPORTED_MODULE_0__.vModelText, $data.form.message]])]), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_45, [_hoisted_46, (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
+      , _hoisted_50), [[vue__WEBPACK_IMPORTED_MODULE_0__.vModelText, $data.form.text_message]])])), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("div", _hoisted_51, [$data.is_recording || $data.stop_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)(vue__WEBPACK_IMPORTED_MODULE_0__.Fragment, {
+        key: 0
+      }, [$data.is_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("button", {
+        key: 0,
+        "class": "flex items-center justify-center h-10 w-8 text-gray-400",
+        type: "button",
         onClick: _cache[3] || (_cache[3] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function () {
+          return $options.stopAudioRecordAndProcess && $options.stopAudioRecordAndProcess.apply($options, arguments);
+        }, ["prevent"]))
+      }, _hoisted_53)) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true), $data.stop_recording ? ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)("button", {
+        key: 1,
+        "class": "flex items-center justify-center h-10 w-8 text-gray-400",
+        type: "button",
+        onClick: _cache[4] || (_cache[4] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function () {
+          return $options.clearRecord && $options.clearRecord.apply($options, arguments);
+        }, ["prevent"]))
+      }, _hoisted_55)) : (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("v-if", true)], 64
+      /* STABLE_FRAGMENT */
+      )) : ((0,vue__WEBPACK_IMPORTED_MODULE_0__.openBlock)(), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementBlock)(vue__WEBPACK_IMPORTED_MODULE_0__.Fragment, {
+        key: 1
+      }, [_hoisted_56, (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("button", {
+        onClick: _cache[5] || (_cache[5] = (0,vue__WEBPACK_IMPORTED_MODULE_0__.withModifiers)(function () {
           return $options.selectNewPhoto && $options.selectNewPhoto.apply($options, arguments);
         }, ["prevent"])),
         "class": "flex items-center justify-center h-10 w-8 text-gray-400 ml-1 mr-2"
-      }, _hoisted_48)])]), _hoisted_49])], 32
+      }, _hoisted_58)], 64
+      /* STABLE_FRAGMENT */
+      ))])]), _hoisted_59])], 32
       /* HYDRATE_EVENTS */
       )])])])])]), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createElementVNode)("input", {
         type: "file",
         name: "images",
         ref: "ImagePath",
+        onInput: _cache[7] || (_cache[7] = function ($event) {
+          return $data.form.file_data = $event.target.files;
+        }),
         "class": "opacity-0",
         id: "images",
         accept: "image/jpeg,image/jpg,image/png",
-        onChange: _cache[5] || (_cache[5] = function () {
+        onChange: _cache[8] || (_cache[8] = function () {
           return $options.updatePhotoPreview && $options.updatePhotoPreview.apply($options, arguments);
-        })
+        }),
+        multiple: ""
       }, null, 544
       /* HYDRATE_EVENTS, NEED_PATCH */
       ), (0,vue__WEBPACK_IMPORTED_MODULE_0__.createCommentVNode)("        @input=\"form.images = $event.target.files[0]\"")];
@@ -27280,6 +27467,55 @@ module.exports = function hasSymbols() {
 var bind = __webpack_require__(/*! function-bind */ "./node_modules/function-bind/index.js");
 
 module.exports = bind.call(Function.call, Object.prototype.hasOwnProperty);
+
+
+/***/ }),
+
+/***/ "./node_modules/inline-worker/index.js":
+/*!*********************************************!*\
+  !*** ./node_modules/inline-worker/index.js ***!
+  \*********************************************/
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+var WORKER_ENABLED = !!(__webpack_require__.g === __webpack_require__.g.window && __webpack_require__.g.URL && __webpack_require__.g.Blob && __webpack_require__.g.Worker);
+
+function InlineWorker(func, self) {
+  var _this = this;
+  var functionBody;
+
+  self = self || {};
+
+  if (WORKER_ENABLED) {
+    functionBody = func.toString().trim().match(
+      /^function\s*\w*\s*\([\w\s,]*\)\s*{([\w\W]*?)}$/
+    )[1];
+
+    return new __webpack_require__.g.Worker(__webpack_require__.g.URL.createObjectURL(
+      new __webpack_require__.g.Blob([ functionBody ], { type: "text/javascript" })
+    ));
+  }
+
+  function postMessage(data) {
+    setTimeout(function() {
+      _this.onmessage({ data: data });
+    }, 0);
+  }
+
+  this.self = self;
+  this.self.postMessage = postMessage;
+
+  setTimeout(func.bind(self, self), 0);
+}
+
+InlineWorker.prototype.postMessage = function postMessage(data) {
+  var _this = this;
+
+  setTimeout(function() {
+    _this.self.onmessage({ data: data });
+  }, 0);
+};
+
+module.exports = InlineWorker;
 
 
 /***/ }),
@@ -77763,6 +77999,498 @@ module.exports = {
     merge: merge
 };
 
+
+/***/ }),
+
+/***/ "./node_modules/recorder-js/index.js":
+/*!*******************************************!*\
+  !*** ./node_modules/recorder-js/index.js ***!
+  \*******************************************/
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(/*! ./lib/index.js */ "./node_modules/recorder-js/lib/index.js");
+
+
+/***/ }),
+
+/***/ "./node_modules/recorder-js/lib/index.js":
+/*!***********************************************!*\
+  !*** ./node_modules/recorder-js/lib/index.js ***!
+  \***********************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
+
+var _microphone = __webpack_require__(/*! ./microphone */ "./node_modules/recorder-js/lib/microphone.js");
+
+var _microphone2 = _interopRequireDefault(_microphone);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+var defaultConfig = {
+  nFrequencyBars: 255,
+  onAnalysed: null
+};
+
+var Recorder = function () {
+  function Recorder(audioContext) {
+    var config = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+    _classCallCheck(this, Recorder);
+
+    this.config = Object.assign({}, defaultConfig, config);
+
+    this.audioContext = audioContext;
+    this.audioInput = null;
+    this.realAudioInput = null;
+    this.inputPoint = null;
+    this.audioRecorder = null;
+    this.rafID = null;
+    this.analyserContext = null;
+    this.recIndex = 0;
+    this.stream = null;
+
+    this.updateAnalysers = this.updateAnalysers.bind(this);
+  }
+
+  _createClass(Recorder, [{
+    key: 'init',
+    value: function init(stream) {
+      var _this = this;
+
+      return new Promise(function (resolve) {
+        _this.inputPoint = _this.audioContext.createGain();
+
+        _this.stream = stream;
+
+        _this.realAudioInput = _this.audioContext.createMediaStreamSource(stream);
+        _this.audioInput = _this.realAudioInput;
+        _this.audioInput.connect(_this.inputPoint);
+
+        _this.analyserNode = _this.audioContext.createAnalyser();
+        _this.analyserNode.fftSize = 2048;
+        _this.inputPoint.connect(_this.analyserNode);
+
+        _this.audioRecorder = new _microphone2.default(_this.inputPoint);
+
+        var zeroGain = _this.audioContext.createGain();
+        zeroGain.gain.value = 0.0;
+
+        _this.inputPoint.connect(zeroGain);
+        zeroGain.connect(_this.audioContext.destination);
+
+        _this.updateAnalysers();
+
+        resolve();
+      });
+    }
+  }, {
+    key: 'start',
+    value: function start() {
+      var _this2 = this;
+
+      return new Promise(function (resolve, reject) {
+        if (!_this2.audioRecorder) {
+          reject('Not currently recording');
+          return;
+        }
+
+        _this2.audioRecorder.clear();
+        _this2.audioRecorder.record();
+
+        resolve(_this2.stream);
+      });
+    }
+  }, {
+    key: 'stop',
+    value: function stop() {
+      var _this3 = this;
+
+      return new Promise(function (resolve) {
+        _this3.audioRecorder.stop();
+
+        _this3.audioRecorder.getBuffer(function (buffer) {
+          _this3.audioRecorder.exportWAV(function (blob) {
+            return resolve({ buffer: buffer, blob: blob });
+          });
+        });
+      });
+    }
+  }, {
+    key: 'updateAnalysers',
+    value: function updateAnalysers() {
+      if (this.config.onAnalysed) {
+        requestAnimationFrame(this.updateAnalysers);
+
+        var freqByteData = new Uint8Array(this.analyserNode.frequencyBinCount);
+
+        this.analyserNode.getByteFrequencyData(freqByteData);
+
+        var data = new Array(255);
+        var lastNonZero = 0;
+        var datum = void 0;
+
+        for (var idx = 0; idx < 255; idx += 1) {
+          datum = Math.floor(freqByteData[idx]) - Math.floor(freqByteData[idx]) % 5;
+
+          if (datum !== 0) {
+            lastNonZero = idx;
+          }
+
+          data[idx] = datum;
+        }
+
+        this.config.onAnalysed({ data: data, lineTo: lastNonZero });
+      }
+    }
+  }, {
+    key: 'setOnAnalysed',
+    value: function setOnAnalysed(handler) {
+      this.config.onAnalysed = handler;
+    }
+  }]);
+
+  return Recorder;
+}();
+
+Recorder.download = function download(blob) {
+  var filename = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'audio';
+
+  _microphone2.default.forceDownload(blob, filename + '.wav');
+};
+
+exports["default"] = Recorder;
+
+/***/ }),
+
+/***/ "./node_modules/recorder-js/lib/microphone.js":
+/*!****************************************************!*\
+  !*** ./node_modules/recorder-js/lib/microphone.js ***!
+  \****************************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({
+  value: true
+}));
+
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }(); /* eslint-disable */
+/**
+ * License (MIT)
+ *
+ * Copyright © 2013 Matt Diamond
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ */
+
+
+var _inlineWorker = __webpack_require__(/*! inline-worker */ "./node_modules/inline-worker/index.js");
+
+var _inlineWorker2 = _interopRequireDefault(_inlineWorker);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+var defaultConfig = {
+  bufferLen: 4096,
+  numChannels: 2,
+  mimeType: 'audio/wav'
+};
+
+var Microphone = function () {
+  function Microphone(source, config) {
+    var _this = this;
+
+    _classCallCheck(this, Microphone);
+
+    this.config = Object.assign({}, defaultConfig, config);
+
+    this.recording = false;
+
+    this.callbacks = {
+      getBuffer: [],
+      exportWAV: []
+    };
+
+    this.context = source.context;
+    this.node = (this.context.createScriptProcessor || this.context.createJavaScriptNode).call(this.context, this.config.bufferLen, this.config.numChannels, this.config.numChannels);
+
+    this.node.onaudioprocess = function (e) {
+      if (!_this.recording) return;
+
+      var buffer = [];
+      for (var channel = 0; channel < _this.config.numChannels; channel++) {
+        buffer.push(e.inputBuffer.getChannelData(channel));
+      }
+      _this.worker.postMessage({
+        command: 'record',
+        buffer: buffer
+      });
+    };
+
+    source.connect(this.node);
+    this.node.connect(this.context.destination); //this should not be necessary
+
+    var self = {};
+    this.worker = new _inlineWorker2.default(function () {
+      var recLength = 0,
+          recBuffers = [],
+          sampleRate = void 0,
+          numChannels = void 0;
+
+      this.onmessage = function (e) {
+        switch (e.data.command) {
+          case 'init':
+            init(e.data.config);
+            break;
+          case 'record':
+            record(e.data.buffer);
+            break;
+          case 'exportWAV':
+            exportWAV(e.data.type);
+            break;
+          case 'getBuffer':
+            getBuffer();
+            break;
+          case 'clear':
+            clear();
+            break;
+        }
+      };
+
+      function init(config) {
+        sampleRate = config.sampleRate;
+        numChannels = config.numChannels;
+        initBuffers();
+      }
+
+      function record(inputBuffer) {
+        for (var channel = 0; channel < numChannels; channel++) {
+          recBuffers[channel].push(inputBuffer[channel]);
+        }
+        recLength += inputBuffer[0].length;
+      }
+
+      function exportWAV(type) {
+        var buffers = [];
+        for (var channel = 0; channel < numChannels; channel++) {
+          buffers.push(mergeBuffers(recBuffers[channel], recLength));
+        }
+        var interleaved = void 0;
+        if (numChannels === 2) {
+          interleaved = interleave(buffers[0], buffers[1]);
+        } else {
+          interleaved = buffers[0];
+        }
+        var dataview = encodeWAV(interleaved);
+        var audioBlob = new Blob([dataview], { type: type });
+
+        this.postMessage({ command: 'exportWAV', data: audioBlob });
+      }
+
+      function getBuffer() {
+        var buffers = [];
+        for (var channel = 0; channel < numChannels; channel++) {
+          buffers.push(mergeBuffers(recBuffers[channel], recLength));
+        }
+        this.postMessage({ command: 'getBuffer', data: buffers });
+      }
+
+      function clear() {
+        recLength = 0;
+        recBuffers = [];
+        initBuffers();
+      }
+
+      function initBuffers() {
+        for (var channel = 0; channel < numChannels; channel++) {
+          recBuffers[channel] = [];
+        }
+      }
+
+      function mergeBuffers(recBuffers, recLength) {
+        var result = new Float32Array(recLength);
+        var offset = 0;
+        for (var i = 0; i < recBuffers.length; i++) {
+          result.set(recBuffers[i], offset);
+          offset += recBuffers[i].length;
+        }
+        return result;
+      }
+
+      function interleave(inputL, inputR) {
+        var length = inputL.length + inputR.length;
+        var result = new Float32Array(length);
+
+        var index = 0,
+            inputIndex = 0;
+
+        while (index < length) {
+          result[index++] = inputL[inputIndex];
+          result[index++] = inputR[inputIndex];
+          inputIndex++;
+        }
+        return result;
+      }
+
+      function floatTo16BitPCM(output, offset, input) {
+        for (var i = 0; i < input.length; i++, offset += 2) {
+          var s = Math.max(-1, Math.min(1, input[i]));
+          output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+      }
+
+      function writeString(view, offset, string) {
+        for (var i = 0; i < string.length; i += 1) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      }
+
+      function encodeWAV(samples) {
+        var buffer = new ArrayBuffer(44 + samples.length * 2);
+        var view = new DataView(buffer);
+
+        /* RIFF identifier */
+        writeString(view, 0, 'RIFF');
+        /* RIFF chunk length */
+        view.setUint32(4, 36 + samples.length * 2, true);
+        /* RIFF type */
+        writeString(view, 8, 'WAVE');
+        /* format chunk identifier */
+        writeString(view, 12, 'fmt ');
+        /* format chunk length */
+        view.setUint32(16, 16, true);
+        /* sample format (raw) */
+        view.setUint16(20, 1, true);
+        /* channel count */
+        view.setUint16(22, numChannels, true);
+        /* sample rate */
+        view.setUint32(24, sampleRate, true);
+        /* byte rate (sample rate * block align) */
+        view.setUint32(28, sampleRate * 4, true);
+        /* block align (channel count * bytes per sample) */
+        view.setUint16(32, numChannels * 2, true);
+        /* bits per sample */
+        view.setUint16(34, 16, true);
+        /* data chunk identifier */
+        writeString(view, 36, 'data');
+        /* data chunk length */
+        view.setUint32(40, samples.length * 2, true);
+
+        floatTo16BitPCM(view, 44, samples);
+
+        return view;
+      }
+    }, self);
+
+    this.worker.postMessage({
+      command: 'init',
+      config: {
+        sampleRate: this.context.sampleRate,
+        numChannels: this.config.numChannels
+      }
+    });
+
+    this.worker.onmessage = function (e) {
+      var cb = _this.callbacks[e.data.command].pop();
+      if (typeof cb === 'function') {
+        cb(e.data.data);
+      }
+    };
+  }
+
+  _createClass(Microphone, [{
+    key: 'record',
+    value: function record() {
+      this.recording = true;
+    }
+  }, {
+    key: 'stop',
+    value: function stop() {
+      this.recording = false;
+    }
+  }, {
+    key: 'clear',
+    value: function clear() {
+      this.worker.postMessage({ command: 'clear' });
+    }
+  }, {
+    key: 'getBuffer',
+    value: function getBuffer(cb) {
+      cb = cb || this.config.callback;
+
+      if (!cb) throw new Error('Callback not set');
+
+      this.callbacks.getBuffer.push(cb);
+
+      this.worker.postMessage({ command: 'getBuffer' });
+    }
+  }, {
+    key: 'exportWAV',
+    value: function exportWAV(cb, mimeType) {
+      mimeType = mimeType || this.config.mimeType;
+      cb = cb || this.config.callback;
+
+      if (!cb) throw new Error('Callback not set');
+
+      this.callbacks.exportWAV.push(cb);
+
+      this.worker.postMessage({
+        command: 'exportWAV',
+        type: mimeType
+      });
+    }
+  }]);
+
+  return Microphone;
+}();
+
+Microphone.forceDownload = function forceDownload(blob, filename) {
+  var a = document.createElement('a');
+
+  a.style = 'display: none';
+  document.body.appendChild(a);
+
+  var url = window.URL.createObjectURL(blob);
+
+  a.href = url;
+  a.download = filename;
+  a.click();
+
+  window.URL.revokeObjectURL(url);
+
+  document.body.removeChild(a);
+};
+
+exports["default"] = Microphone;
 
 /***/ }),
 

@@ -198,24 +198,27 @@
                                 </div>
                             </div>
                             <form action="" @submit.prevent="sendMessage()" class="inline">
-                                <div v-if="form.images" class="bg-gray-100 px-5 py-2 space-y-2 lg:space-y-0 lg:gap-2 flex items-start content-start">
-                                    <div class="w-32 rounded relative">
+                                <div v-if="temp_images.length > 0" class="bg-gray-100 px-5 py-2 space-y-2 lg:space-y-0 lg:gap-2 flex items-start content-start">
+                                    <div class="w-32 rounded relative" v-for="(image, idx) of temp_images">
                                         <a class="h-6 w-6 bg-red-600 rounded-full absolute top-0 right-0 flex justify-center items-center"
-                                            href="#" @click.prevent="removeImage()"
+                                            href="#" @click.prevent="removeImage(idx)"
                                         >
                                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                                             </svg>
                                         </a>
-                                        <img :src="form.images"
+                                        <img :src="image"
                                              alt="image" class="w-32 max-h-32 rounded shadow">
                                     </div>
                                 </div>
                                 <div class="flex flex-row items-center bg-white px-6 pb-4 pt-2">
 
                                     <div class="flex flex-row items-center w-full border rounded-3xl h-12 px-2">
-                                        <button type="button" class="flex items-center justify-center h-10 w-10 text-gray-400 ml-1">
+                                        <button type="button" class="flex items-center justify-center h-10 w-10 text-gray-400 ml-1 relative"
+                                            @click.prevent="startRecording"
+                                        >
                                             <svg class="w-5 h-5"
+                                                 :class="is_recording?'text-purple-700': ''"
                                                  fill="none"
                                                  stroke="currentColor"
                                                  viewBox="0 0 24 24"
@@ -225,44 +228,66 @@
                                                       stroke-width="2"
                                                       d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
                                             </svg>
+                                            <span v-if="is_recording" class="animate-ping absolute inline-flex w-6 h-6 rounded-full bg-purple-400 opacity-75"></span>
                                         </button>
-                                        <div class="w-full">
+                                        <div class="w-full" v-if="is_recording || stop_recording">
+                                            <p class="text-purple-500 font-bold pl-3" v-if="!stop_recording">Recording.....</p>
+                                            <audio v-if="stop_recording" :src="temp_audio_url" controls class="w-full" style="padding: 10px;"></audio>
+                                        </div>
+                                        <div class="w-full" v-else>
                                             <input type="text"
-                                                   v-model="form.message"
+                                                   v-model="form.text_message"
                                                    @keyup="typing()"
-                                                   :disabled="form.images"
+                                                   :disabled="temp_images.length > 0"
                                                    class="border border-transparent w-full focus:outline-none text-sm h-10 flex items-center"
                                                    placeholder="Type your message....">
 
                                         </div>
                                         <div class="flex flex-row">
-                                            <button class="flex items-center justify-center h-10 w-8 text-gray-400">
-                                                <svg class="w-5 h-5"
-                                                     fill="none"
-                                                     stroke="currentColor"
-                                                     viewBox="0 0 24 24"
-                                                     xmlns="http://www.w3.org/2000/svg">
-                                                    <path stroke-linecap="round"
-                                                          stroke-linejoin="round"
-                                                          stroke-width="2"
-                                                          d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
-                                                </svg>
-                                            </button>
-                                            <button
-                                                @click.prevent="selectNewPhoto"
-                                                class="flex items-center justify-center h-10 w-8 text-gray-400 ml-1 mr-2">
-                                                <svg class="w-5 h-5"
-                                                     fill="none"
-                                                     stroke="currentColor"
-                                                     viewBox="0 0 24 24"
-                                                     xmlns="http://www.w3.org/2000/svg">
-                                                    <path stroke-linecap="round"
-                                                          stroke-linejoin="round"
-                                                          stroke-width="2"
-                                                          d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                                                </svg>
-                                            </button>
-
+                                            <template v-if="is_recording || stop_recording">
+                                                <button class="flex items-center justify-center h-10 w-8 text-gray-400" type="button"
+                                                        v-if="is_recording"
+                                                @click.prevent="stopAudioRecordAndProcess">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-600" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+                                                    </svg>
+                                                </button>
+                                                <button class="flex items-center justify-center h-10 w-8 text-gray-400" type="button"
+                                                        v-if="stop_recording"
+                                                        @click.prevent="clearRecord">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                    </svg>
+                                                </button>
+                                            </template>
+                                            <template v-else>
+                                                <button class="flex items-center justify-center h-10 w-8 text-gray-400">
+                                                    <svg class="w-5 h-5"
+                                                         fill="none"
+                                                         stroke="currentColor"
+                                                         viewBox="0 0 24 24"
+                                                         xmlns="http://www.w3.org/2000/svg">
+                                                        <path stroke-linecap="round"
+                                                              stroke-linejoin="round"
+                                                              stroke-width="2"
+                                                              d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+                                                    </svg>
+                                                </button>
+                                                <button
+                                                    @click.prevent="selectNewPhoto"
+                                                    class="flex items-center justify-center h-10 w-8 text-gray-400 ml-1 mr-2">
+                                                    <svg class="w-5 h-5"
+                                                         fill="none"
+                                                         stroke="currentColor"
+                                                         viewBox="0 0 24 24"
+                                                         xmlns="http://www.w3.org/2000/svg">
+                                                        <path stroke-linecap="round"
+                                                              stroke-linejoin="round"
+                                                              stroke-width="2"
+                                                              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                                    </svg>
+                                                </button>
+                                            </template>
                                         </div>
                                     </div>
                                     <div class="ml-6">
@@ -290,9 +315,11 @@
         </div>
         <input type="file" name="images"
                ref="ImagePath"
+               @input="form.file_data = $event.target.files"
                class="opacity-0" id="images"
                accept="image/jpeg,image/jpg,image/png"
                @change="updatePhotoPreview"
+               multiple
         >
 
 <!--        @input="form.images = $event.target.files[0]"-->
@@ -303,6 +330,7 @@
 import AppLayout from '@/Layouts/AppLayout.vue'
 import UserItem from "@/Components/UserItem";
 import _ from 'lodash';
+import Recorder from 'recorder-js';
 
 export default {
     components: {
@@ -316,17 +344,26 @@ export default {
             last_page:1,
             perPage: 15,
             userId:'',
-            messages: [],
             selectedUser: '',
             authUser: this.user,
             liveUsers:[],
+            typingUserIds: [],
+            messages: [],
             form: {
                 user_id: '',
-                message: '',
+                text_message: '',
                 message_type: this.types['Text'],
-                images: null,
+                file_data: []
             },
-            typingUserIds: [],
+
+            temp_images: [],
+            is_recording: false,
+            stop_recording: false,
+            audioContext: new (window.AudioContext || window.webkitAudioContext)(),
+            recorder: '',
+            gumStream: '',
+            temp_blob_audio: '',
+            temp_audio_url: '',
 
         }
     },
@@ -418,20 +455,48 @@ export default {
             })
         },
         sendMessage(){
-            this.form.user_id = this.userId;
-            axios.post(route('user.message.send'), this.form)
+            var formData = this.formData();
+            axios.post(route('user.message.send'),formData)
                 .then((response) => {
-                    if (response.status == 200){
+                    if (response.status === 200){
                         this.messages.push(response.data);
-                        this.form.message = '';
-                        this.form.images =null;
-                        this.form.message_type=this.types['Text'];
                         this.scrollToBottom();
                         this.updateLastMessage(response.data);
+                        this.resetFormData();
                     }
                 }).catch(err => {
                 console.log(err)
             });
+        },
+
+        formData(){
+            var fd = new FormData();
+            fd.append('user_id', this.userId);
+            fd.append('text_message', this.form.text_message);
+            fd.append('message_type', this.form.message_type);
+
+            if(this.form.message_type === this.types['Text']){
+                fd.append('file_data', null);
+            }else if(this.form.message_type === this.types['Audio']){
+                let filename = new Date().toISOString();
+                fd.append('file_data', this.temp_blob_audio, filename);
+            }else if(this.form.message_type === this.types['Image']){
+                let images = [];
+                for (let i=0; i<this.temp_images.length; i++){
+                    images.push(this.temp_images[i]);
+                }
+                fd.append('file_data', images);
+            }
+
+            return fd;
+        },
+        resetFormData(){
+            this.form.user_id= '';
+            this.form.text_message= '';
+            this.form.message_type= this.types['Text'];
+            this.form.file_data= null;
+            this.temp_images = [];
+            this.clearRecord();
         },
         selectNewPhoto() {
             this.$refs.ImagePath.click();
@@ -439,16 +504,72 @@ export default {
 
         updatePhotoPreview() {
             this.form.message_type= this.types['Image'];
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                this.form.images = e.target.result;
-            };
-            reader.readAsDataURL(this.$refs.ImagePath.files[0]);
+
+            for (let i=0; i< this.$refs.ImagePath.files.length; i++){
+                var reader = new FileReader();
+                reader.onload = (e) => {
+                    this.temp_images.push(e.target.result);
+                };
+                reader.readAsDataURL(this.$refs.ImagePath.files[i]);
+            }
+
         },
-        removeImage(){
+        removeImage(key){
+            this.temp_images.splice(key, 1);
+            this.form.file_data.splice(key, 1);
+            if(this.temp_images.length == 0){
+                this.form.message_type= this.types['Text'];
+            }
+        },
+
+        startRecording(){
+            this.typing();
+            const $that = this;
+            navigator.mediaDevices.getUserMedia({audio: true})
+                .then(function(stream) {
+                    /* Create the Recorder object and configure to record mono sound (1 channel) Recording 2 channels will double the file size */
+                    $that.recorder = new Recorder($that.audioContext, {
+                        numChannels: 1,
+                    });
+                    $that.recorder.init(stream);
+                    //start the recording process
+                    $that.recorder.start()
+                    .then(()=>{
+                        $that.is_recording = true;
+                    });
+                    console.log("Recording started");
+                })
+                .catch(function(err) {
+                    //enable the record button if getUserMedia() fails
+                    console.log(err);
+                    $that.is_recording = false;
+                });
+
+        },
+
+        stopAudioRecordAndProcess(){
+            const $that = this;
+            this.recorder.stop()
+                .then(({blob, buffer}) => {
+                    $that.createDownloadLink(blob);
+                });
+        },
+        createDownloadLink(blob) {
+            this.temp_blob_audio = blob;
+            let URL = window.URL || window.webkitURL;
+            this.temp_audio_url = URL.createObjectURL(blob);
+            this.stop_recording = true;
+            this.is_recording = false;
+        },
+        clearRecord(){
+            this.temp_blob_audio = '';
+            this.recorder = '';
+            this.gumStream = '';
+            this.temp_audio_url = '';
+            this.stop_recording = false;
+            this.is_recording = false;
             this.form.message_type= this.types['Text'];
-            this.form.images = null;
-        }
+        },
 
     },
     computed: {
